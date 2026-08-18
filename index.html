@@ -4,6 +4,16 @@
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no" />
   <title>Finish Line LED Timing</title>
+  
+  <!-- PWA Meta Tags -->
+  <link rel="manifest" href="manifest.json" />
+  <meta name="theme-color" content="#2563eb" />
+  <meta name="mobile-web-app-capable" content="yes" />
+  <meta name="apple-mobile-web-app-capable" content="yes" />
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
+  <meta name="apple-mobile-web-app-title" content="RaceTimer" />
+  <link rel="apple-touch-icon" href="https://cdn-icons-png.flaticon.com/512/3253/3253163.png" />
+
   <style>
     body {
       margin: 0;
@@ -15,7 +25,7 @@
     #container {
       position: relative;
       width: 100vw;
-      height: 60vh;
+      height: 55vh;
       background: #000;
     }
     video, canvas {
@@ -28,7 +38,7 @@
     }
     #ui {
       padding: 10px 16px;
-      height: 40vh;
+      height: 45vh;
       box-sizing: border-box;
       overflow-y: auto;
       background: #1e1e1e;
@@ -40,7 +50,7 @@
       align-items: center;
     }
     button {
-      padding: 8px 16px;
+      padding: 8px 14px;
       background: #2563eb;
       color: white;
       border: none;
@@ -49,6 +59,10 @@
       cursor: pointer;
     }
     button:disabled { background: #555; }
+    #installBtn {
+      display: none;
+      background: #059669;
+    }
     .slider-group {
       display: flex;
       flex-direction: column;
@@ -86,27 +100,28 @@
 <div id="ui">
   <div class="controls">
     <button id="startBtn">Start Camera</button>
-    <button id="resetBtn">Reset Results</button>
+    <button id="installBtn">Install App</button>
+    <button id="resetBtn">Reset</button>
     <div class="slider-group">
-      <label>Finish Line Position: <span id="posVal">50%</span></label>
+      <label>Line: <span id="posVal">50%</span></label>
       <input type="range" id="lineSlider" min="10" max="90" value="50" />
     </div>
   </div>
   <div class="controls">
     <div class="slider-group">
-      <label>Min Brightness Threshold: <span id="threshVal">200</span></label>
+      <label>Min Brightness: <span id="threshVal">200</span></label>
       <input type="range" id="threshSlider" min="100" max="255" value="200" />
     </div>
   </div>
 
-  <h3>Finish Order & Splits</h3>
+  <h4 style="margin: 6px 0;">Finish Order & Splits</h4>
   <table>
     <thead>
       <tr>
-        <th>Place</th>
+        <th>#</th>
         <th>Color</th>
-        <th>Timestamp</th>
-        <th>Delta (Split)</th>
+        <th>Time</th>
+        <th>Split</th>
       </tr>
     </thead>
     <tbody id="resultsBody"></tbody>
@@ -114,6 +129,32 @@
 </div>
 
 <script>
+  // Register Service Worker
+  if ('serviceWorker' in navigator) {
+    navigator.serviceWorker.register('sw.js').catch(console.error);
+  }
+
+  // Handle PWA Install Prompt
+  let deferredPrompt;
+  const installBtn = document.getElementById('installBtn');
+
+  window.addEventListener('beforeinstallprompt', (e) => {
+    e.preventDefault();
+    deferredPrompt = e;
+    installBtn.style.display = 'inline-block';
+  });
+
+  installBtn.addEventListener('click', async () => {
+    if (!deferredPrompt) return;
+    deferredPrompt.prompt();
+    const { outcome } = await deferredPrompt.userChoice;
+    if (outcome === 'accepted') {
+      installBtn.style.display = 'none';
+    }
+    deferredPrompt = null;
+  });
+
+  // App Timing Logic
   const video = document.getElementById('webcam');
   const canvas = document.getElementById('overlay');
   const ctx = canvas.getContext('2d');
@@ -125,7 +166,7 @@
 
   let isRunning = false;
   let finishCrossings = [];
-  const DEBOUNCE_MS = 4000; // Ignore same color hits within 4 seconds
+  const DEBOUNCE_MS = 4000;
   const lastColorTrigger = {};
 
   startBtn.addEventListener('click', async () => {
@@ -140,7 +181,7 @@
       isRunning = true;
       requestAnimationFrame(processFrame);
     } catch (err) {
-      alert('Camera access denied or unavailable: ' + err.message);
+      alert('Camera error: ' + err.message);
     }
   });
 
@@ -159,9 +200,8 @@
 
   function getDetectedColor(r, g, b, thresh) {
     const max = Math.max(r, g, b);
-    if (max < thresh) return null; // Too dim
+    if (max < thresh) return null;
 
-    // Simple RGB Hue categorization
     if (r > 1.3 * g && r > 1.3 * b) return { name: 'Red', hex: '#ef4444' };
     if (g > 1.2 * r && g > 1.1 * b) return { name: 'Green', hex: '#22c55e' };
     if (b > 1.2 * r && b > 1.1 * g) return { name: 'Blue', hex: '#3b82f6' };
@@ -185,14 +225,13 @@
       const thresh = parseInt(threshSlider.value, 10);
       const now = performance.now();
 
-      // Sample a 3-pixel-wide vertical strip along the finish line
       const stripWidth = 3;
       const startX = Math.max(0, targetX - 1);
       const imgData = ctx.getImageData(startX, 0, stripWidth, canvas.height).data;
 
       const detectedInFrame = new Set();
 
-      for (let y = 0; y < canvas.height; y += 4) { // Step 4px for performance
+      for (let y = 0; y < canvas.height; y += 4) {
         for (let xOffset = 0; xOffset < stripWidth; xOffset++) {
           const idx = (y * stripWidth + xOffset) * 4;
           const r = imgData[idx];
@@ -202,15 +241,12 @@
           const color = getDetectedColor(r, g, b, thresh);
           if (color) {
             detectedInFrame.add(color.name);
-
-            // Highlight hit on canvas
             ctx.fillStyle = color.hex;
             ctx.fillRect(startX, y, 6, 6);
           }
         }
       }
 
-      // Check crossings with debounce
       detectedInFrame.forEach((colName) => {
         if (!lastColorTrigger[colName] || (now - lastColorTrigger[colName] > DEBOUNCE_MS)) {
           lastColorTrigger[colName] = now;
@@ -218,7 +254,6 @@
         }
       });
 
-      // Draw Virtual Sighting Line
       ctx.strokeStyle = 'rgba(255, 255, 255, 0.8)';
       ctx.lineWidth = 2;
       ctx.setLineDash([6, 6]);
