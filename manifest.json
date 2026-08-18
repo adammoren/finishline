@@ -1,0 +1,19 @@
+{
+  "name": "Race Sightline Timer",
+  "short_name": "RaceTimer",
+  "description": "Optical finish line timer for LED-marked boat races.",
+  "start_url": "./index.html",
+  "scope": "./",
+  "display": "standalone",
+  "background_color": "#111111",
+  "theme_color": "#2563eb",
+  "orientation": "portrait-primary",
+  "icons": [
+    {
+      "src": "https://cdn-icons-png.flaticon.com/512/3253/3253163.png",
+      "sizes": "512x512",
+      "type": "image/png",
+      "purpose": "any maskable"
+    }
+  ]
+}
