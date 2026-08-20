@@ -5,13 +5,11 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no" />
   <title>RaceSight Finish Line Timer</title>
   
-  <!-- PWA Metadata -->
   <link rel="manifest" href="manifest.json" />
   <meta name="theme-color" content="#2563eb" />
   <meta name="mobile-web-app-capable" content="yes" />
   <meta name="apple-mobile-web-app-capable" content="yes" />
   <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
-  <meta name="apple-mobile-web-app-title" content="RaceTimer" />
   <link rel="apple-touch-icon" href="https://cdn-icons-png.flaticon.com/512/3253/3253163.png" />
 
   <style>
@@ -25,7 +23,7 @@
     #container {
       position: relative;
       width: 100vw;
-      height: 52vh;
+      height: 50vh;
       background: #000;
     }
     video, canvas {
@@ -37,35 +35,44 @@
       object-fit: cover;
     }
     #ui {
-      padding: 10px 14px;
-      height: 48vh;
+      padding: 8px 12px;
+      height: 50vh;
       box-sizing: border-box;
       overflow-y: auto;
       background: #1e1e1e;
     }
     .row {
       display: flex;
-      gap: 8px;
-      margin-bottom: 8px;
+      gap: 6px;
+      margin-bottom: 6px;
       align-items: center;
     }
     button {
-      padding: 7px 12px;
+      padding: 6px 10px;
       background: #2563eb;
       color: white;
       border: none;
       border-radius: 5px;
       font-weight: 600;
-      font-size: 13px;
+      font-size: 12px;
       cursor: pointer;
     }
     button:disabled { background: #444; color: #888; }
     button.start-btn { background: #16a34a; }
     button.stop-btn { background: #dc2626; }
-    #installBtn { display: none; background: #059669; }
-    .btn-group { display: flex; gap: 4px; }
+    select {
+      padding: 6px 8px;
+      background: #334155;
+      color: #f8fafc;
+      border: 1px solid #475569;
+      border-radius: 5px;
+      font-size: 12px;
+      max-width: 100%;
+      flex: 1;
+    }
+    .btn-group { display: flex; gap: 3px; }
     .btn-sm {
-      padding: 5px 8px;
+      padding: 4px 7px;
       background: #334155;
       font-size: 11px;
     }
@@ -81,34 +88,34 @@
     input[type=range] { width: 100%; margin: 2px 0; }
     #timerDisplay {
       font-family: monospace;
-      font-size: 18px;
+      font-size: 16px;
       font-weight: 700;
       color: #38bdf8;
       background: #0f172a;
-      padding: 4px 8px;
+      padding: 4px 6px;
       border-radius: 4px;
       border: 1px solid #334155;
-      min-width: 95px;
+      min-width: 85px;
       text-align: center;
     }
     table {
       width: 100%;
       border-collapse: collapse;
-      font-size: 13px;
-      margin-top: 6px;
+      font-size: 12px;
+      margin-top: 4px;
     }
     th, td {
-      padding: 5px 6px;
+      padding: 4px 6px;
       text-align: left;
       border-bottom: 1px solid #333;
     }
-    th { color: #94a3b8; font-size: 11px; text-transform: uppercase; }
+    th { color: #94a3b8; font-size: 10px; text-transform: uppercase; }
     .badge {
       display: inline-block;
       width: 10px;
       height: 10px;
       border-radius: 50%;
-      margin-right: 6px;
+      margin-right: 4px;
       vertical-align: middle;
     }
   </style>
@@ -121,29 +128,36 @@
 </div>
 
 <div id="ui">
-  <!-- Camera & Timer Controls (FR-05) -->
+  <!-- Lens/Camera Selector Row -->
   <div class="row">
+    <select id="cameraSelect">
+      <option value="">Detecting Camera Lenses...</option>
+    </select>
     <button id="camBtn">Start Camera</button>
+  </div>
+
+  <!-- Race Control & Timer Display -->
+  <div class="row">
     <button id="timerBtn" class="start-btn" disabled>Start Race (T₀)</button>
     <div id="timerDisplay">00:00.00</div>
-    <button id="installBtn">Install</button>
     <button id="resetBtn">Reset</button>
   </div>
 
-  <!-- FR-10: Zoom Controls -->
+  <!-- Zoom Controls -->
   <div class="row">
     <div class="slider-group">
       <label>Zoom: <span id="zoomVal">1.0x</span></label>
-      <input type="range" id="zoomSlider" min="1" max="5" step="0.1" value="1" disabled />
+      <input type="range" id="zoomSlider" min="1" max="10" step="0.1" value="1" disabled />
     </div>
     <div class="btn-group">
       <button class="btn-sm active" id="zoom1x">1x</button>
       <button class="btn-sm" id="zoom2x">2x</button>
       <button class="btn-sm" id="zoom3x">3x</button>
+      <button class="btn-sm" id="zoom5x">5x</button>
     </div>
   </div>
 
-  <!-- Line & Brightness Controls -->
+  <!-- Alignment & Sensitivity -->
   <div class="row">
     <div class="slider-group">
       <label>Finish Line: <span id="posVal">50%</span></label>
@@ -151,14 +165,14 @@
     </div>
     <div class="slider-group">
       <label>Min Brightness: <span id="threshVal">200</span></label>
-      <input type="range" id="threshSlider" min="100" max="255" value="200" />
+      <input type="range" id="threshSlider" min="80" max="255" value="200" />
     </div>
   </div>
 
   <table>
     <thead>
       <tr>
-        <th>Place</th>
+        <th>#</th>
         <th>Color</th>
         <th>Elapsed</th>
         <th>Split</th>
@@ -169,31 +183,15 @@
 </div>
 
 <script>
-  // Service Worker Registration for PWA
   if ('serviceWorker' in navigator) {
     navigator.serviceWorker.register('sw.js').catch(console.error);
   }
-
-  // PWA Install Prompt
-  let deferredPrompt;
-  const installBtn = document.getElementById('installBtn');
-  window.addEventListener('beforeinstallprompt', (e) => {
-    e.preventDefault();
-    deferredPrompt = e;
-    installBtn.style.display = 'inline-block';
-  });
-  installBtn.addEventListener('click', async () => {
-    if (!deferredPrompt) return;
-    deferredPrompt.prompt();
-    const { outcome } = await deferredPrompt.userChoice;
-    if (outcome === 'accepted') installBtn.style.display = 'none';
-    deferredPrompt = null;
-  });
 
   const video = document.getElementById('webcam');
   const canvas = document.getElementById('overlay');
   const ctx = canvas.getContext('2d');
 
+  const cameraSelect = document.getElementById('cameraSelect');
   const camBtn = document.getElementById('camBtn');
   const timerBtn = document.getElementById('timerBtn');
   const timerDisplay = document.getElementById('timerDisplay');
@@ -203,8 +201,8 @@
   const zoomSlider = document.getElementById('zoomSlider');
   const zoomVal = document.getElementById('zoomVal');
   const resultsBody = document.getElementById('resultsBody');
-  const zoomButtons = [document.getElementById('zoom1x'), document.getElementById('zoom2x'), document.getElementById('zoom3x')];
 
+  let currentStream = null;
   let videoTrack = null;
   let isCameraRunning = false;
   let raceRunning = false;
@@ -215,8 +213,38 @@
   let finishCrossings = [];
   const DEBOUNCE_MS = 4000;
   const lastColorTrigger = {};
+  let activeTriggers = []; // Holds active trigger points for rendering large markers
 
-  // Timer Formatter
+  // --- Enumerate Physical Camera Lenses ---
+  async function listCameras() {
+    try {
+      // Temporary stream to request permissions on mobile
+      const tempStream = await navigator.mediaDevices.getUserMedia({ video: true, audio: false });
+      const devices = await navigator.mediaDevices.enumerateDevices();
+      tempStream.getTracks().forEach(t => t.stop());
+
+      cameraSelect.innerHTML = '';
+      const videoDevices = devices.filter(d => d.kind === 'videoinput');
+
+      videoDevices.forEach((device, index) => {
+        const option = document.createElement('option');
+        option.value = device.deviceId;
+        // Label or fallback
+        option.text = device.label || `Camera Lens ${index + 1} (${device.deviceId.slice(0, 5)}...)`;
+        if (device.label.toLowerCase().includes('back') || device.label.toLowerCase().includes('environment') || device.label.toLowerCase().includes('telephoto') || device.label.toLowerCase().includes('rear')) {
+          option.selected = true;
+        }
+        cameraSelect.appendChild(option);
+      });
+    } catch (e) {
+      console.warn('Unable to enumerate cameras:', e);
+      cameraSelect.innerHTML = '<option value="">Default Rear Camera</option>';
+    }
+  }
+
+  window.addEventListener('DOMContentLoaded', listCameras);
+
+  // --- Timer State (FR-05) ---
   function formatTime(ms) {
     const totalSeconds = ms / 1000;
     const minutes = Math.floor(totalSeconds / 60);
@@ -245,69 +273,86 @@
     }
   });
 
-  // Camera & Zoom Init
-  camBtn.addEventListener('click', async () => {
-    try {
-      const stream = await navigator.mediaDevices.getUserMedia({
-        video: {
-          facingMode: { ideal: 'environment' },
-          width: { ideal: 1920 },
-          height: { ideal: 1080 }
-        },
-        audio: false
-      });
-      video.srcObject = stream;
-      video.play();
-      camBtn.disabled = true;
-      timerBtn.disabled = false;
-      isCameraRunning = true;
+  // --- Start / Switch Camera Stream ---
+  async function startCamera(deviceId = null) {
+    if (currentStream) {
+      currentStream.getTracks().forEach(t => t.stop());
+    }
 
-      videoTrack = stream.getVideoTracks()[0];
+    const constraints = {
+      video: {
+        width: { ideal: 1920 },
+        height: { ideal: 1080 }
+      },
+      audio: false
+    };
+
+    if (deviceId) {
+      constraints.video.deviceId = { exact: deviceId };
+    } else {
+      constraints.video.facingMode = { ideal: 'environment' };
+    }
+
+    try {
+      currentStream = await navigator.mediaDevices.getUserMedia(constraints);
+      video.srcObject = currentStream;
+      await video.play();
+
+      videoTrack = currentStream.getVideoTracks()[0];
       const capabilities = videoTrack.getCapabilities ? videoTrack.getCapabilities() : {};
 
       if (capabilities.zoom) {
         hasHardwareZoom = true;
         zoomSlider.min = capabilities.zoom.min || 1;
-        zoomSlider.max = Math.min(capabilities.zoom.max || 5, 8);
+        zoomSlider.max = capabilities.zoom.max || 10;
         zoomSlider.step = capabilities.zoom.step || 0.1;
+      } else {
+        hasHardwareZoom = false;
+        zoomSlider.min = 1;
+        zoomSlider.max = 8;
+        zoomSlider.step = 0.1;
       }
       zoomSlider.disabled = false;
 
+      camBtn.disabled = true;
+      timerBtn.disabled = false;
+      isCameraRunning = true;
       requestAnimationFrame(processFrame);
     } catch (err) {
       alert('Camera error: ' + err.message);
     }
+  }
+
+  camBtn.addEventListener('click', () => startCamera(cameraSelect.value || null));
+  cameraSelect.addEventListener('change', () => {
+    if (isCameraRunning) startCamera(cameraSelect.value);
   });
 
+  // --- FR-10: Zoom Handling ---
   async function setZoom(zoomLevel) {
     currentZoom = parseFloat(zoomLevel);
     zoomSlider.value = currentZoom;
     zoomVal.innerText = `${currentZoom.toFixed(1)}x`;
 
-    zoomButtons.forEach((btn, idx) => {
-      btn.classList.toggle('active', (idx + 1) === Math.round(currentZoom));
-    });
+    document.querySelectorAll('.btn-group .btn-sm').forEach(btn => btn.classList.remove('active'));
 
     if (hasHardwareZoom && videoTrack) {
       try {
         await videoTrack.applyConstraints({ advanced: [{ zoom: currentZoom }] });
       } catch (err) {
-        console.warn('Hardware zoom fallback to canvas crop:', err);
+        console.warn('Hardware zoom failed, using fallback digital scaling:', err);
       }
     }
   }
 
   zoomSlider.addEventListener('input', (e) => setZoom(e.target.value));
-  document.getElementById('zoom1x').addEventListener('click', () => setZoom(1.0));
-  document.getElementById('zoom2x').addEventListener('click', () => setZoom(2.0));
-  document.getElementById('zoom3x').addEventListener('click', () => setZoom(3.0));
+  document.getElementById('zoom1x').addEventListener('click', (e) => { setZoom(1.0); e.target.classList.add('active'); });
+  document.getElementById('zoom2x').addEventListener('click', (e) => { setZoom(2.0); e.target.classList.add('active'); });
+  document.getElementById('zoom3x').addEventListener('click', (e) => { setZoom(3.0); e.target.classList.add('active'); });
+  document.getElementById('zoom5x').addEventListener('click', (e) => { setZoom(5.0); e.target.classList.add('active'); });
 
-  lineSlider.addEventListener('input', (e) => {
-    document.getElementById('posVal').innerText = `${e.target.value}%`;
-  });
-  threshSlider.addEventListener('input', (e) => {
-    document.getElementById('threshVal').innerText = e.target.value;
-  });
+  lineSlider.addEventListener('input', (e) => document.getElementById('posVal').innerText = `${e.target.value}%`);
+  threshSlider.addEventListener('input', (e) => document.getElementById('threshVal').innerText = e.target.value);
 
   resetBtn.addEventListener('click', () => {
     raceRunning = false;
@@ -316,6 +361,7 @@
     timerBtn.className = 'start-btn';
     timerDisplay.innerText = '00:00.00';
     finishCrossings = [];
+    activeTriggers = [];
     resultsBody.innerHTML = '';
     for (let key in lastColorTrigger) delete lastColorTrigger[key];
   });
@@ -331,6 +377,36 @@
     if (g > 160 && b > 160 && r < 120) return { name: 'Cyan', hex: '#06b6d4' };
 
     return null;
+  }
+
+  function drawLargeTriggerMarker(x, y, colorHex) {
+    const time = performance.now() * 0.005;
+    const radius = 24 + Math.sin(time) * 4;
+
+    ctx.save();
+    // Outer Pulsing Ring
+    ctx.strokeStyle = colorHex;
+    ctx.lineWidth = 3;
+    ctx.beginPath();
+    ctx.arc(x, y, radius, 0, 2 * Math.PI);
+    ctx.stroke();
+
+    // Inner Glowing Core
+    ctx.fillStyle = colorHex;
+    ctx.beginPath();
+    ctx.arc(x, y, 6, 0, 2 * Math.PI);
+    ctx.fill();
+
+    // Crosshairs
+    ctx.strokeStyle = 'rgba(255, 255, 255, 0.9)';
+    ctx.lineWidth = 2;
+    ctx.beginPath();
+    ctx.moveTo(x - radius - 8, y);
+    ctx.lineTo(x + radius + 8, y);
+    ctx.moveTo(x, y - radius - 8);
+    ctx.lineTo(x, y + radius + 8);
+    ctx.stroke();
+    ctx.restore();
   }
 
   function processFrame() {
@@ -359,7 +435,7 @@
       const startX = Math.max(0, targetX - 1);
       const imgData = ctx.getImageData(startX, 0, stripWidth, canvas.height).data;
 
-      const detectedInFrame = new Set();
+      const currentHits = [];
 
       for (let y = 0; y < canvas.height; y += 4) {
         for (let xOffset = 0; xOffset < stripWidth; xOffset++) {
@@ -370,20 +446,28 @@
 
           const color = getDetectedColor(r, g, b, thresh);
           if (color) {
-            detectedInFrame.add(color.name);
-            ctx.fillStyle = color.hex;
-            ctx.fillRect(startX, y, 6, 6);
+            currentHits.push({ name: color.name, hex: color.hex, x: startX, y: y });
           }
         }
       }
 
-      detectedInFrame.forEach((colName) => {
-        if (!lastColorTrigger[colName] || (now - lastColorTrigger[colName] > DEBOUNCE_MS)) {
-          lastColorTrigger[colName] = now;
-          recordCrossing(colName, now);
+      // Check crossings & store active triggers for visual rendering
+      currentHits.forEach((hit) => {
+        if (!lastColorTrigger[hit.name] || (now - lastColorTrigger[hit.name] > DEBOUNCE_MS)) {
+          lastColorTrigger[hit.name] = now;
+          recordCrossing(hit.name, now);
         }
+        // Add to active markers with a 1.5s visual decay timer
+        activeTriggers = activeTriggers.filter(t => now - t.time < 1500);
+        activeTriggers.push({ x: hit.x, y: hit.y, hex: hit.hex, time: now });
       });
 
+      // Render Large Trigger Reticles
+      activeTriggers.forEach((marker) => {
+        drawLargeTriggerMarker(marker.x, marker.y, marker.hex);
+      });
+
+      // Render Virtual Transit Sightline
       ctx.strokeStyle = 'rgba(255, 255, 255, 0.85)';
       ctx.lineWidth = 2;
       ctx.setLineDash([6, 6]);
