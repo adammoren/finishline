@@ -1,7 +1,7 @@
 {
-  "name": "Race Sightline Timer",
-  "short_name": "RaceTimer",
-  "description": "Optical finish line timer for LED-marked boat races.",
+  "name": "RaceSight Finish Line Timer",
+  "short_name": "RaceSight",
+  "description": "Optical transit line timer and LED tracker for watercraft races.",
   "start_url": "./index.html",
   "scope": "./",
   "display": "standalone",
