@@ -23,7 +23,7 @@
     #container {
       position: relative;
       width: 100vw;
-      height: 46vh;
+      height: 44vh;
       background: #000;
     }
     video, canvas {
@@ -36,7 +36,7 @@
     }
     #ui {
       padding: 8px 12px;
-      height: 54vh;
+      height: 56vh;
       box-sizing: border-box;
       overflow-y: auto;
       background: #1e1e1e;
@@ -44,7 +44,7 @@
     .row {
       display: flex;
       gap: 6px;
-      margin-bottom: 6px;
+      margin-bottom: 5px;
       align-items: center;
     }
     button {
@@ -61,7 +61,7 @@
     button.start-btn { background: #16a34a; }
     button.stop-btn { background: #dc2626; }
     select {
-      padding: 6px 8px;
+      padding: 5px 8px;
       background: #334155;
       color: #f8fafc;
       border: 1px solid #475569;
@@ -88,14 +88,14 @@
     input[type=range] { width: 100%; margin: 2px 0; }
     #timerDisplay {
       font-family: monospace;
-      font-size: 16px;
+      font-size: 15px;
       font-weight: 700;
       color: #38bdf8;
       background: #0f172a;
       padding: 4px 6px;
       border-radius: 4px;
       border: 1px solid #334155;
-      min-width: 85px;
+      min-width: 80px;
       text-align: center;
     }
     table {
@@ -143,7 +143,7 @@
     <button id="resetBtn">Reset</button>
   </div>
 
-  <!-- Zoom Controls -->
+  <!-- FR-10: Zoom & FR-09: Exposure Controls -->
   <div class="row">
     <div class="slider-group">
       <label>Zoom: <span id="zoomVal">1.0x</span></label>
@@ -157,25 +157,30 @@
     </div>
   </div>
 
-  <!-- Finish Line Horizontal & Vertical Controls -->
+  <!-- Exposure / Gain (FR-09) -->
   <div class="row">
     <div class="slider-group">
-      <label>Line X (Position): <span id="xVal">50%</span></label>
-      <input type="range" id="lineXSlider" min="5" max="95" value="50" />
+      <label>Exposure / Gain (FR-09): <span id="expVal">1.0x</span></label>
+      <input type="range" id="expSlider" min="0.2" max="3.0" step="0.1" value="1.0" />
     </div>
     <div class="slider-group">
-      <label>Min Brightness: <span id="threshVal">200</span></label>
-      <input type="range" id="threshSlider" min="80" max="255" value="200" />
+      <label>Min Brightness: <span id="threshVal">160</span></label>
+      <input type="range" id="threshSlider" min="40" max="255" value="160" />
     </div>
   </div>
 
+  <!-- Finish Line Horizontal & Vertical Controls -->
   <div class="row">
     <div class="slider-group">
-      <label>Line Top (Y₁): <span id="topVal">15%</span></label>
+      <label>Line X: <span id="xVal">50%</span></label>
+      <input type="range" id="lineXSlider" min="5" max="95" value="50" />
+    </div>
+    <div class="slider-group">
+      <label>Top Y₁: <span id="topVal">15%</span></label>
       <input type="range" id="lineTopSlider" min="0" max="80" value="15" />
     </div>
     <div class="slider-group">
-      <label>Line Bottom (Y₂): <span id="bottomVal">85%</span></label>
+      <label>Bottom Y₂: <span id="bottomVal">85%</span></label>
       <input type="range" id="lineBottomSlider" min="20" max="100" value="85" />
     </div>
   </div>
@@ -211,7 +216,10 @@
   const lineXSlider = document.getElementById('lineXSlider');
   const lineTopSlider = document.getElementById('lineTopSlider');
   const lineBottomSlider = document.getElementById('lineBottomSlider');
+  const expSlider = document.getElementById('expSlider');
+  const expVal = document.getElementById('expVal');
   const threshSlider = document.getElementById('threshSlider');
+  const threshVal = document.getElementById('threshVal');
   const zoomSlider = document.getElementById('zoomSlider');
   const zoomVal = document.getElementById('zoomVal');
   const resultsBody = document.getElementById('resultsBody');
@@ -222,7 +230,9 @@
   let raceRunning = false;
   let raceStartTime = null;
   let currentZoom = 1.0;
+  let currentGain = 1.0;
   let hasHardwareZoom = false;
+  let hasHardwareExposure = false;
 
   let finishCrossings = [];
   const DEBOUNCE_MS = 4000;
@@ -310,6 +320,7 @@
       videoTrack = currentStream.getVideoTracks()[0];
       const capabilities = videoTrack.getCapabilities ? videoTrack.getCapabilities() : {};
 
+      // Zoom capability detection
       if (capabilities.zoom) {
         hasHardwareZoom = true;
         zoomSlider.min = capabilities.zoom.min || 1;
@@ -322,6 +333,11 @@
         zoomSlider.step = 0.1;
       }
       zoomSlider.disabled = false;
+
+      // Exposure Compensation hardware detection
+      if (capabilities.exposureCompensation) {
+        hasHardwareExposure = true;
+      }
 
       camBtn.disabled = true;
       timerBtn.disabled = false;
@@ -359,6 +375,24 @@
   document.getElementById('zoom3x').addEventListener('click', (e) => { setZoom(3.0); e.target.classList.add('active'); });
   document.getElementById('zoom5x').addEventListener('click', (e) => { setZoom(5.0); e.target.classList.add('active'); });
 
+  // FR-09: Exposure / Gain Handler
+  expSlider.addEventListener('input', async (e) => {
+    currentGain = parseFloat(e.target.value);
+    expVal.innerText = `${currentGain.toFixed(1)}x`;
+
+    if (hasHardwareExposure && videoTrack) {
+      try {
+        const capabilities = videoTrack.getCapabilities();
+        const minExp = capabilities.exposureCompensation.min;
+        const maxExp = capabilities.exposureCompensation.max;
+        const mappedExp = minExp + (currentGain / 3.0) * (maxExp - minExp);
+        await videoTrack.applyConstraints({ advanced: [{ exposureCompensation: mappedExp }] });
+      } catch (err) {
+        console.warn('Hardware exposure adjustment failed, using software gain fallback:', err);
+      }
+    }
+  });
+
   lineXSlider.addEventListener('input', (e) => document.getElementById('xVal').innerText = `${e.target.value}%`);
   lineTopSlider.addEventListener('input', (e) => {
     if (parseInt(e.target.value) >= parseInt(lineBottomSlider.value)) {
@@ -372,7 +406,9 @@
     }
     document.getElementById('bottomVal').innerText = `${e.target.value}%`;
   });
-  threshSlider.addEventListener('input', (e) => document.getElementById('threshVal').innerText = e.target.value);
+  threshSlider.addEventListener('input', (e) => {
+    threshVal.innerText = e.target.value;
+  });
 
   resetBtn.addEventListener('click', () => {
     raceRunning = false;
@@ -387,6 +423,11 @@
   });
 
   function getDetectedColor(r, g, b, thresh) {
+    // Apply exposure multiplier to incoming pixel values
+    r = Math.min(255, r * currentGain);
+    g = Math.min(255, g * currentGain);
+    b = Math.min(255, b * currentGain);
+
     const max = Math.max(r, g, b);
     if (max < thresh) return null;
 
@@ -455,7 +496,6 @@
       const thresh = parseInt(threshSlider.value, 10);
       const now = performance.now();
 
-      // Sample only between startY and endY
       const stripWidth = 3;
       const startX = Math.max(0, targetX - 1);
       const imgData = ctx.getImageData(startX, startY, stripWidth, stripHeight).data;
@@ -490,7 +530,7 @@
         drawLargeTriggerMarker(marker.x, marker.y, marker.hex);
       });
 
-      // Render Virtual Transit Sightline (Shortened to Top and Bottom Bounds)
+      // Render Virtual Transit Sightline
       ctx.strokeStyle = 'rgba(56, 189, 248, 0.9)';
       ctx.lineWidth = 3;
       ctx.setLineDash([8, 6]);
@@ -500,7 +540,6 @@
       ctx.stroke();
       ctx.setLineDash([]);
 
-      // Draw Top and Bottom Boundary End-Caps
       ctx.fillStyle = '#38bdf8';
       ctx.fillRect(targetX - 8, startY - 2, 16, 4);
       ctx.fillRect(targetX - 8, endY - 2, 16, 4);
