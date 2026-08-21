@@ -98,6 +98,21 @@
       min-width: 80px;
       text-align: center;
     }
+    #recIndicator {
+      display: inline-block;
+      width: 8px;
+      height: 8px;
+      background: #dc2626;
+      border-radius: 50%;
+      margin-right: 4px;
+      display: none;
+      animation: pulse 1s infinite;
+    }
+    @keyframes pulse {
+      0% { opacity: 1; }
+      50% { opacity: 0.3; }
+      100% { opacity: 1; }
+    }
     table {
       width: 100%;
       border-collapse: collapse;
@@ -128,7 +143,7 @@
 </div>
 
 <div id="ui">
-  <!-- Lens/Camera Selector Row -->
+  <!-- Camera Selector -->
   <div class="row">
     <select id="cameraSelect">
       <option value="">Detecting Camera Lenses...</option>
@@ -139,11 +154,13 @@
   <!-- Race Control & Timer Display -->
   <div class="row">
     <button id="timerBtn" class="start-btn" disabled>Start Race (T₀)</button>
-    <div id="timerDisplay">00:00.00</div>
+    <div id="timerDisplay">
+      <span id="recIndicator"></span>00:00.00
+    </div>
     <button id="resetBtn">Reset</button>
   </div>
 
-  <!-- FR-10: Zoom & FR-09: Exposure Controls -->
+  <!-- Zoom Controls -->
   <div class="row">
     <div class="slider-group">
       <label>Zoom: <span id="zoomVal">1.0x</span></label>
@@ -157,10 +174,10 @@
     </div>
   </div>
 
-  <!-- Exposure / Gain (FR-09) -->
+  <!-- Exposure / Gain -->
   <div class="row">
     <div class="slider-group">
-      <label>Exposure / Gain (FR-09): <span id="expVal">1.0x</span></label>
+      <label>Exposure / Gain: <span id="expVal">1.0x</span></label>
       <input type="range" id="expSlider" min="0.2" max="3.0" step="0.1" value="1.0" />
     </div>
     <div class="slider-group">
@@ -169,7 +186,7 @@
     </div>
   </div>
 
-  <!-- Finish Line Horizontal & Vertical Controls -->
+  <!-- Finish Line Controls -->
   <div class="row">
     <div class="slider-group">
       <label>Line X: <span id="xVal">50%</span></label>
@@ -211,6 +228,7 @@
   const camBtn = document.getElementById('camBtn');
   const timerBtn = document.getElementById('timerBtn');
   const timerDisplay = document.getElementById('timerDisplay');
+  const recIndicator = document.getElementById('recIndicator');
   const resetBtn = document.getElementById('resetBtn');
   
   const lineXSlider = document.getElementById('lineXSlider');
@@ -233,6 +251,10 @@
   let currentGain = 1.0;
   let hasHardwareZoom = false;
   let hasHardwareExposure = false;
+
+  // MediaRecorder Video Capture
+  let mediaRecorder = null;
+  let recordedChunks = [];
 
   let finishCrossings = [];
   const DEBOUNCE_MS = 4000;
@@ -272,24 +294,78 @@
     return `${String(minutes).padStart(2, '0')}:${String(seconds).padStart(5, '0')}`;
   }
 
+  function getFormattedTimestamp() {
+    const d = new Date();
+    const pad = (n) => String(n).padStart(2, '0');
+    return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}_${pad(d.getHours())}-${pad(d.getMinutes())}-${pad(d.getSeconds())}`;
+  }
+
   function updateTimer() {
     if (!raceRunning) return;
     const elapsed = performance.now() - raceStartTime;
-    timerDisplay.innerText = formatTime(elapsed);
+    timerDisplay.innerHTML = `<span id="recIndicator" style="display:inline-block;"></span>${formatTime(elapsed)}`;
     requestAnimationFrame(updateTimer);
+  }
+
+  function startVideoRecording() {
+    recordedChunks = [];
+    // Capture stream from canvas (includes video + finish line + triggers)
+    const stream = canvas.captureStream ? canvas.captureStream(30) : currentStream;
+    
+    let mimeType = 'video/webm;codecs=vp8';
+    if (!MediaRecorder.isTypeSupported(mimeType)) {
+      mimeType = MediaRecorder.isTypeSupported('video/mp4') ? 'video/mp4' : 'video/webm';
+    }
+
+    try {
+      mediaRecorder = new MediaRecorder(stream, { mimeType });
+      mediaRecorder.ondataavailable = (e) => {
+        if (e.data && e.data.size > 0) recordedChunks.push(e.data);
+      };
+      mediaRecorder.onstop = saveVideoFile;
+      mediaRecorder.start(1000); // 1-second chunks
+    } catch (err) {
+      console.warn('MediaRecorder error:', err);
+    }
+  }
+
+  function stopVideoRecording() {
+    if (mediaRecorder && mediaRecorder.state !== 'inactive') {
+      mediaRecorder.stop();
+    }
+  }
+
+  function saveVideoFile() {
+    if (recordedChunks.length === 0) return;
+    const blob = new Blob(recordedChunks, { type: recordedChunks[0].type || 'video/webm' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.style.display = 'none';
+    a.href = url;
+    a.download = `race_finish_${getFormattedTimestamp()}.webm`;
+    document.body.appendChild(a);
+    a.click();
+    setTimeout(() => {
+      document.body.removeChild(a);
+      URL.revokeObjectURL(url);
+    }, 100);
   }
 
   timerBtn.addEventListener('click', () => {
     if (!raceRunning) {
+      // START RACE (T_0) + START RECORDING
       raceStartTime = performance.now();
       raceRunning = true;
-      timerBtn.innerText = 'Stop Race';
+      timerBtn.innerText = 'Stop Race & Save Video';
       timerBtn.className = 'stop-btn';
+      startVideoRecording();
       requestAnimationFrame(updateTimer);
     } else {
+      // STOP RACE + STOP & SAVE RECORDING
       raceRunning = false;
       timerBtn.innerText = 'Start Race (T₀)';
       timerBtn.className = 'start-btn';
+      stopVideoRecording();
     }
   });
 
@@ -320,7 +396,6 @@
       videoTrack = currentStream.getVideoTracks()[0];
       const capabilities = videoTrack.getCapabilities ? videoTrack.getCapabilities() : {};
 
-      // Zoom capability detection
       if (capabilities.zoom) {
         hasHardwareZoom = true;
         zoomSlider.min = capabilities.zoom.min || 1;
@@ -334,7 +409,6 @@
       }
       zoomSlider.disabled = false;
 
-      // Exposure Compensation hardware detection
       if (capabilities.exposureCompensation) {
         hasHardwareExposure = true;
       }
@@ -375,7 +449,6 @@
   document.getElementById('zoom3x').addEventListener('click', (e) => { setZoom(3.0); e.target.classList.add('active'); });
   document.getElementById('zoom5x').addEventListener('click', (e) => { setZoom(5.0); e.target.classList.add('active'); });
 
-  // FR-09: Exposure / Gain Handler
   expSlider.addEventListener('input', async (e) => {
     currentGain = parseFloat(e.target.value);
     expVal.innerText = `${currentGain.toFixed(1)}x`;
@@ -388,7 +461,7 @@
         const mappedExp = minExp + (currentGain / 3.0) * (maxExp - minExp);
         await videoTrack.applyConstraints({ advanced: [{ exposureCompensation: mappedExp }] });
       } catch (err) {
-        console.warn('Hardware exposure adjustment failed, using software gain fallback:', err);
+        console.warn('Hardware exposure fallback:', err);
       }
     }
   });
@@ -406,16 +479,17 @@
     }
     document.getElementById('bottomVal').innerText = `${e.target.value}%`;
   });
-  threshSlider.addEventListener('input', (e) => {
-    threshVal.innerText = e.target.value;
-  });
+  threshSlider.addEventListener('input', (e) => threshVal.innerText = e.target.value);
 
   resetBtn.addEventListener('click', () => {
-    raceRunning = false;
+    if (raceRunning) {
+      raceRunning = false;
+      stopVideoRecording();
+    }
     raceStartTime = null;
     timerBtn.innerText = 'Start Race (T₀)';
     timerBtn.className = 'start-btn';
-    timerDisplay.innerText = '00:00.00';
+    timerDisplay.innerHTML = '00:00.00';
     finishCrossings = [];
     activeTriggers = [];
     resultsBody.innerHTML = '';
@@ -423,7 +497,6 @@
   });
 
   function getDetectedColor(r, g, b, thresh) {
-    // Apply exposure multiplier to incoming pixel values
     r = Math.min(255, r * currentGain);
     g = Math.min(255, g * currentGain);
     b = Math.min(255, b * currentGain);
@@ -496,42 +569,46 @@
       const thresh = parseInt(threshSlider.value, 10);
       const now = performance.now();
 
-      const stripWidth = 3;
-      const startX = Math.max(0, targetX - 1);
-      const imgData = ctx.getImageData(startX, startY, stripWidth, stripHeight).data;
+      // Only scan for finish triggers if race stopwatch is running
+      if (raceRunning) {
+        const stripWidth = 3;
+        const startX = Math.max(0, targetX - 1);
+        const imgData = ctx.getImageData(startX, startY, stripWidth, stripHeight).data;
 
-      const currentHits = [];
+        const currentHits = [];
 
-      for (let relY = 0; relY < stripHeight; relY += 4) {
-        const absY = startY + relY;
-        for (let xOffset = 0; xOffset < stripWidth; xOffset++) {
-          const idx = (relY * stripWidth + xOffset) * 4;
-          const r = imgData[idx];
-          const g = imgData[idx + 1];
-          const b = imgData[idx + 2];
+        for (let relY = 0; relY < stripHeight; relY += 4) {
+          const absY = startY + relY;
+          for (let xOffset = 0; xOffset < stripWidth; xOffset++) {
+            const idx = (relY * stripWidth + xOffset) * 4;
+            const r = imgData[idx];
+            const g = imgData[idx + 1];
+            const b = imgData[idx + 2];
 
-          const color = getDetectedColor(r, g, b, thresh);
-          if (color) {
-            currentHits.push({ name: color.name, hex: color.hex, x: startX, y: absY });
+            const color = getDetectedColor(r, g, b, thresh);
+            if (color) {
+              currentHits.push({ name: color.name, hex: color.hex, x: startX, y: absY });
+            }
           }
         }
+
+        currentHits.forEach((hit) => {
+          if (!lastColorTrigger[hit.name] || (now - lastColorTrigger[hit.name] > DEBOUNCE_MS)) {
+            lastColorTrigger[hit.name] = now;
+            recordCrossing(hit.name, now);
+          }
+          activeTriggers = activeTriggers.filter(t => now - t.time < 1500);
+          activeTriggers.push({ x: hit.x, y: hit.y, hex: hit.hex, time: now });
+        });
       }
 
-      currentHits.forEach((hit) => {
-        if (!lastColorTrigger[hit.name] || (now - lastColorTrigger[hit.name] > DEBOUNCE_MS)) {
-          lastColorTrigger[hit.name] = now;
-          recordCrossing(hit.name, now);
-        }
-        activeTriggers = activeTriggers.filter(t => now - t.time < 1500);
-        activeTriggers.push({ x: hit.x, y: hit.y, hex: hit.hex, time: now });
-      });
-
+      // Render Active Trigger Reticles
       activeTriggers.forEach((marker) => {
         drawLargeTriggerMarker(marker.x, marker.y, marker.hex);
       });
 
-      // Render Virtual Transit Sightline
-      ctx.strokeStyle = 'rgba(56, 189, 248, 0.9)';
+      // Render Virtual Sightline
+      ctx.strokeStyle = raceRunning ? 'rgba(56, 189, 248, 0.95)' : 'rgba(148, 163, 184, 0.6)';
       ctx.lineWidth = 3;
       ctx.setLineDash([8, 6]);
       ctx.beginPath();
@@ -540,7 +617,7 @@
       ctx.stroke();
       ctx.setLineDash([]);
 
-      ctx.fillStyle = '#38bdf8';
+      ctx.fillStyle = raceRunning ? '#38bdf8' : '#94a3b8';
       ctx.fillRect(targetX - 8, startY - 2, 16, 4);
       ctx.fillRect(targetX - 8, endY - 2, 16, 4);
     }
@@ -551,7 +628,7 @@
   function recordCrossing(colorName, timestamp) {
     const place = finishCrossings.length + 1;
     let splitText = '--- (Winner)';
-    let elapsedText = 'N/A';
+    let elapsedText = '0.00s';
 
     if (raceStartTime !== null) {
       const elapsedMs = timestamp - raceStartTime;
