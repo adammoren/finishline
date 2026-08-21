@@ -23,7 +23,7 @@
     #container {
       position: relative;
       width: 100vw;
-      height: 50vh;
+      height: 46vh;
       background: #000;
     }
     video, canvas {
@@ -36,7 +36,7 @@
     }
     #ui {
       padding: 8px 12px;
-      height: 50vh;
+      height: 54vh;
       box-sizing: border-box;
       overflow-y: auto;
       background: #1e1e1e;
@@ -157,15 +157,26 @@
     </div>
   </div>
 
-  <!-- Alignment & Sensitivity -->
+  <!-- Finish Line Horizontal & Vertical Controls -->
   <div class="row">
     <div class="slider-group">
-      <label>Finish Line: <span id="posVal">50%</span></label>
-      <input type="range" id="lineSlider" min="10" max="90" value="50" />
+      <label>Line X (Position): <span id="xVal">50%</span></label>
+      <input type="range" id="lineXSlider" min="5" max="95" value="50" />
     </div>
     <div class="slider-group">
       <label>Min Brightness: <span id="threshVal">200</span></label>
       <input type="range" id="threshSlider" min="80" max="255" value="200" />
+    </div>
+  </div>
+
+  <div class="row">
+    <div class="slider-group">
+      <label>Line Top (Y₁): <span id="topVal">15%</span></label>
+      <input type="range" id="lineTopSlider" min="0" max="80" value="15" />
+    </div>
+    <div class="slider-group">
+      <label>Line Bottom (Y₂): <span id="bottomVal">85%</span></label>
+      <input type="range" id="lineBottomSlider" min="20" max="100" value="85" />
     </div>
   </div>
 
@@ -196,7 +207,10 @@
   const timerBtn = document.getElementById('timerBtn');
   const timerDisplay = document.getElementById('timerDisplay');
   const resetBtn = document.getElementById('resetBtn');
-  const lineSlider = document.getElementById('lineSlider');
+  
+  const lineXSlider = document.getElementById('lineXSlider');
+  const lineTopSlider = document.getElementById('lineTopSlider');
+  const lineBottomSlider = document.getElementById('lineBottomSlider');
   const threshSlider = document.getElementById('threshSlider');
   const zoomSlider = document.getElementById('zoomSlider');
   const zoomVal = document.getElementById('zoomVal');
@@ -213,12 +227,10 @@
   let finishCrossings = [];
   const DEBOUNCE_MS = 4000;
   const lastColorTrigger = {};
-  let activeTriggers = []; // Holds active trigger points for rendering large markers
+  let activeTriggers = [];
 
-  // --- Enumerate Physical Camera Lenses ---
   async function listCameras() {
     try {
-      // Temporary stream to request permissions on mobile
       const tempStream = await navigator.mediaDevices.getUserMedia({ video: true, audio: false });
       const devices = await navigator.mediaDevices.enumerateDevices();
       tempStream.getTracks().forEach(t => t.stop());
@@ -229,7 +241,6 @@
       videoDevices.forEach((device, index) => {
         const option = document.createElement('option');
         option.value = device.deviceId;
-        // Label or fallback
         option.text = device.label || `Camera Lens ${index + 1} (${device.deviceId.slice(0, 5)}...)`;
         if (device.label.toLowerCase().includes('back') || device.label.toLowerCase().includes('environment') || device.label.toLowerCase().includes('telephoto') || device.label.toLowerCase().includes('rear')) {
           option.selected = true;
@@ -244,7 +255,6 @@
 
   window.addEventListener('DOMContentLoaded', listCameras);
 
-  // --- Timer State (FR-05) ---
   function formatTime(ms) {
     const totalSeconds = ms / 1000;
     const minutes = Math.floor(totalSeconds / 60);
@@ -273,7 +283,6 @@
     }
   });
 
-  // --- Start / Switch Camera Stream ---
   async function startCamera(deviceId = null) {
     if (currentStream) {
       currentStream.getTracks().forEach(t => t.stop());
@@ -328,7 +337,6 @@
     if (isCameraRunning) startCamera(cameraSelect.value);
   });
 
-  // --- FR-10: Zoom Handling ---
   async function setZoom(zoomLevel) {
     currentZoom = parseFloat(zoomLevel);
     zoomSlider.value = currentZoom;
@@ -340,7 +348,7 @@
       try {
         await videoTrack.applyConstraints({ advanced: [{ zoom: currentZoom }] });
       } catch (err) {
-        console.warn('Hardware zoom failed, using fallback digital scaling:', err);
+        console.warn('Hardware zoom fallback to canvas crop:', err);
       }
     }
   }
@@ -351,7 +359,19 @@
   document.getElementById('zoom3x').addEventListener('click', (e) => { setZoom(3.0); e.target.classList.add('active'); });
   document.getElementById('zoom5x').addEventListener('click', (e) => { setZoom(5.0); e.target.classList.add('active'); });
 
-  lineSlider.addEventListener('input', (e) => document.getElementById('posVal').innerText = `${e.target.value}%`);
+  lineXSlider.addEventListener('input', (e) => document.getElementById('xVal').innerText = `${e.target.value}%`);
+  lineTopSlider.addEventListener('input', (e) => {
+    if (parseInt(e.target.value) >= parseInt(lineBottomSlider.value)) {
+      e.target.value = parseInt(lineBottomSlider.value) - 5;
+    }
+    document.getElementById('topVal').innerText = `${e.target.value}%`;
+  });
+  lineBottomSlider.addEventListener('input', (e) => {
+    if (parseInt(e.target.value) <= parseInt(lineTopSlider.value)) {
+      e.target.value = parseInt(lineTopSlider.value) + 5;
+    }
+    document.getElementById('bottomVal').innerText = `${e.target.value}%`;
+  });
   threshSlider.addEventListener('input', (e) => document.getElementById('threshVal').innerText = e.target.value);
 
   resetBtn.addEventListener('click', () => {
@@ -384,20 +404,17 @@
     const radius = 24 + Math.sin(time) * 4;
 
     ctx.save();
-    // Outer Pulsing Ring
     ctx.strokeStyle = colorHex;
     ctx.lineWidth = 3;
     ctx.beginPath();
     ctx.arc(x, y, radius, 0, 2 * Math.PI);
     ctx.stroke();
 
-    // Inner Glowing Core
     ctx.fillStyle = colorHex;
     ctx.beginPath();
     ctx.arc(x, y, 6, 0, 2 * Math.PI);
     ctx.fill();
 
-    // Crosshairs
     ctx.strokeStyle = 'rgba(255, 255, 255, 0.9)';
     ctx.lineWidth = 2;
     ctx.beginPath();
@@ -426,56 +443,67 @@
         ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
       }
 
-      const linePercent = parseFloat(lineSlider.value) / 100;
-      const targetX = Math.floor(canvas.width * linePercent);
+      const lineXPercent = parseFloat(lineXSlider.value) / 100;
+      const lineTopPercent = parseFloat(lineTopSlider.value) / 100;
+      const lineBottomPercent = parseFloat(lineBottomSlider.value) / 100;
+
+      const targetX = Math.floor(canvas.width * lineXPercent);
+      const startY = Math.floor(canvas.height * lineTopPercent);
+      const endY = Math.floor(canvas.height * lineBottomPercent);
+      const stripHeight = Math.max(1, endY - startY);
+
       const thresh = parseInt(threshSlider.value, 10);
       const now = performance.now();
 
+      // Sample only between startY and endY
       const stripWidth = 3;
       const startX = Math.max(0, targetX - 1);
-      const imgData = ctx.getImageData(startX, 0, stripWidth, canvas.height).data;
+      const imgData = ctx.getImageData(startX, startY, stripWidth, stripHeight).data;
 
       const currentHits = [];
 
-      for (let y = 0; y < canvas.height; y += 4) {
+      for (let relY = 0; relY < stripHeight; relY += 4) {
+        const absY = startY + relY;
         for (let xOffset = 0; xOffset < stripWidth; xOffset++) {
-          const idx = (y * stripWidth + xOffset) * 4;
+          const idx = (relY * stripWidth + xOffset) * 4;
           const r = imgData[idx];
           const g = imgData[idx + 1];
           const b = imgData[idx + 2];
 
           const color = getDetectedColor(r, g, b, thresh);
           if (color) {
-            currentHits.push({ name: color.name, hex: color.hex, x: startX, y: y });
+            currentHits.push({ name: color.name, hex: color.hex, x: startX, y: absY });
           }
         }
       }
 
-      // Check crossings & store active triggers for visual rendering
       currentHits.forEach((hit) => {
         if (!lastColorTrigger[hit.name] || (now - lastColorTrigger[hit.name] > DEBOUNCE_MS)) {
           lastColorTrigger[hit.name] = now;
           recordCrossing(hit.name, now);
         }
-        // Add to active markers with a 1.5s visual decay timer
         activeTriggers = activeTriggers.filter(t => now - t.time < 1500);
         activeTriggers.push({ x: hit.x, y: hit.y, hex: hit.hex, time: now });
       });
 
-      // Render Large Trigger Reticles
       activeTriggers.forEach((marker) => {
         drawLargeTriggerMarker(marker.x, marker.y, marker.hex);
       });
 
-      // Render Virtual Transit Sightline
-      ctx.strokeStyle = 'rgba(255, 255, 255, 0.85)';
-      ctx.lineWidth = 2;
-      ctx.setLineDash([6, 6]);
+      // Render Virtual Transit Sightline (Shortened to Top and Bottom Bounds)
+      ctx.strokeStyle = 'rgba(56, 189, 248, 0.9)';
+      ctx.lineWidth = 3;
+      ctx.setLineDash([8, 6]);
       ctx.beginPath();
-      ctx.moveTo(targetX, 0);
-      ctx.lineTo(targetX, canvas.height);
+      ctx.moveTo(targetX, startY);
+      ctx.lineTo(targetX, endY);
       ctx.stroke();
       ctx.setLineDash([]);
+
+      // Draw Top and Bottom Boundary End-Caps
+      ctx.fillStyle = '#38bdf8';
+      ctx.fillRect(targetX - 8, startY - 2, 16, 4);
+      ctx.fillRect(targetX - 8, endY - 2, 16, 4);
     }
 
     requestAnimationFrame(processFrame);
